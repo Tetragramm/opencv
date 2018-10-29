@@ -58,7 +58,9 @@
 
 #include <functional>
 
+#if !defined(_M_CEE)
 #include <mutex>  // std::mutex, std::lock_guard
+#endif
 
 namespace cv
 {
@@ -143,9 +145,21 @@ public:
     //! returns the current buffer size
     size_t size() const;
     //! returns pointer to the real buffer, stack-allocated or heap-allocated
-    operator _Tp* ();
+    inline _Tp* data() { return ptr; }
     //! returns read-only pointer to the real buffer, stack-allocated or heap-allocated
-    operator const _Tp* () const;
+    inline const _Tp* data() const { return ptr; }
+
+#if !defined(OPENCV_DISABLE_DEPRECATED_COMPATIBILITY) // use to .data() calls instead
+    //! returns pointer to the real buffer, stack-allocated or heap-allocated
+    operator _Tp* () { return ptr; }
+    //! returns read-only pointer to the real buffer, stack-allocated or heap-allocated
+    operator const _Tp* () const { return ptr; }
+#else
+    //! returns a reference to the element at specified location. No bounds checking is performed in Release builds.
+    inline _Tp& operator[] (size_t i) { CV_DbgCheckLT(i, sz, "out of range"); return ptr[i]; }
+    //! returns a reference to the element at specified location. No bounds checking is performed in Release builds.
+    inline const _Tp& operator[] (size_t i) const { CV_DbgCheckLT(i, sz, "out of range"); return ptr[i]; }
+#endif
 
 protected:
     //! pointer to the real buffer, can point to buf if the buffer is small enough
@@ -445,6 +459,18 @@ Returns empty string if feature is not defined
 */
 CV_EXPORTS_W String getHardwareFeatureName(int feature);
 
+/** @brief Returns list of CPU features enabled during compilation.
+
+Returned value is a string containing space separated list of CPU features with following markers:
+
+- no markers - baseline features
+- prefix `*` - features enabled in dispatcher
+- suffix `?` - features enabled but not available in HW
+
+Example: `SSE SSE2 SSE3 *SSE4.1 *SSE4.2 *FP16 *AVX *AVX2 *AVX512-SKX?`
+*/
+CV_EXPORTS std::string getCPUFeaturesLine();
+
 /** @brief Returns the number of logical CPUs available for the process.
  */
 CV_EXPORTS_W int getNumberOfCPUs();
@@ -650,8 +676,10 @@ void Mat::forEach_impl(const Functor& operation) {
 
 /////////////////////////// Synchronization Primitives ///////////////////////////////
 
+#if !defined(_M_CEE)
 typedef std::recursive_mutex Mutex;
 typedef std::lock_guard<cv::Mutex> AutoLock;
+#endif
 
 // TLS interface
 class CV_EXPORTS TLSDataContainer
@@ -919,8 +947,8 @@ public:
     void printErrors() const;
 
 protected:
-    void getByName(const String& name, bool space_delete, int type, void* dst) const;
-    void getByIndex(int index, bool space_delete, int type, void* dst) const;
+    void getByName(const String& name, bool space_delete, Param type, void* dst) const;
+    void getByIndex(int index, bool space_delete, Param type, void* dst) const;
 
     struct Impl;
     Impl* impl;
@@ -1028,23 +1056,6 @@ AutoBuffer<_Tp, fixed_size>::resize(size_t _size)
 template<typename _Tp, size_t fixed_size> inline size_t
 AutoBuffer<_Tp, fixed_size>::size() const
 { return sz; }
-
-template<typename _Tp, size_t fixed_size> inline
-AutoBuffer<_Tp, fixed_size>::operator _Tp* ()
-{ return ptr; }
-
-template<typename _Tp, size_t fixed_size> inline
-AutoBuffer<_Tp, fixed_size>::operator const _Tp* () const
-{ return ptr; }
-
-template<> inline std::string CommandLineParser::get<std::string>(int index, bool space_delete) const
-{
-    return get<String>(index, space_delete);
-}
-template<> inline std::string CommandLineParser::get<std::string>(const String& name, bool space_delete) const
-{
-    return get<String>(name, space_delete);
-}
 
 //! @endcond
 

@@ -263,6 +263,22 @@ CVAPI(double) cvCalibrateCamera2( const CvMat* object_points,
                                 CvTermCriteria term_crit CV_DEFAULT(cvTermCriteria(
                                     CV_TERMCRIT_ITER+CV_TERMCRIT_EPS,30,DBL_EPSILON)) );
 
+/* Finds intrinsic and extrinsic camera parameters
+   from a few views of known calibration pattern */
+CVAPI(double) cvCalibrateCamera4( const CvMat* object_points,
+                                const CvMat* image_points,
+                                const CvMat* point_counts,
+                                CvSize image_size,
+                                int iFixedPoint,
+                                CvMat* camera_matrix,
+                                CvMat* distortion_coeffs,
+                                CvMat* rotation_vectors CV_DEFAULT(NULL),
+                                CvMat* translation_vectors CV_DEFAULT(NULL),
+                                CvMat* newObjPoints CV_DEFAULT(NULL),
+                                int flags CV_DEFAULT(0),
+                                CvTermCriteria term_crit CV_DEFAULT(cvTermCriteria(
+                                    CV_TERMCRIT_ITER+CV_TERMCRIT_EPS,30,DBL_EPSILON)) );
+
 /* Computes various useful characteristics of the camera from the data computed by
    cvCalibrateCamera2 */
 CVAPI(void) cvCalibrationMatrixValues( const CvMat *camera_matrix,
@@ -378,6 +394,39 @@ CVAPI(void) cvValidateDisparity( CvArr* disparity, const CvArr* cost,
 CVAPI(void)  cvReprojectImageTo3D( const CvArr* disparityImage,
                                    CvArr* _3dImage, const CvMat* Q,
                                    int handleMissingValues CV_DEFAULT(0) );
+
+/** @brief Transforms the input image to compensate lens distortion
+@see cv::undistort
+*/
+CVAPI(void) cvUndistort2( const CvArr* src, CvArr* dst,
+                          const CvMat* camera_matrix,
+                          const CvMat* distortion_coeffs,
+                          const CvMat* new_camera_matrix CV_DEFAULT(0) );
+
+/** @brief Computes transformation map from intrinsic camera parameters
+   that can used by cvRemap
+*/
+CVAPI(void) cvInitUndistortMap( const CvMat* camera_matrix,
+                                const CvMat* distortion_coeffs,
+                                CvArr* mapx, CvArr* mapy );
+
+/** @brief Computes undistortion+rectification map for a head of stereo camera
+@see cv::initUndistortRectifyMap
+*/
+CVAPI(void) cvInitUndistortRectifyMap( const CvMat* camera_matrix,
+                                       const CvMat* dist_coeffs,
+                                       const CvMat *R, const CvMat* new_camera_matrix,
+                                       CvArr* mapx, CvArr* mapy );
+
+/** @brief Computes the original (undistorted) feature coordinates
+   from the observed (distorted) coordinates
+@see cv::undistortPoints
+*/
+CVAPI(void) cvUndistortPoints( const CvMat* src, CvMat* dst,
+                               const CvMat* camera_matrix,
+                               const CvMat* dist_coeffs,
+                               const CvMat* R CV_DEFAULT(0),
+                               const CvMat* P CV_DEFAULT(0));
 
 /** @} calib3d_c */
 

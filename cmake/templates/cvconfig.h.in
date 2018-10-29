@@ -92,6 +92,9 @@
 /* Halide support */
 #cmakedefine HAVE_HALIDE
 
+/* Vulkan support */
+#cmakedefine HAVE_VULKAN
+
 /* Define to 1 if you have the <inttypes.h> header file. */
 #cmakedefine HAVE_INTTYPES_H 1
 
@@ -102,9 +105,7 @@
 #cmakedefine HAVE_IPP
 #cmakedefine HAVE_IPP_ICV
 #cmakedefine HAVE_IPP_IW
-
-/* Intel IPP Async */
-#cmakedefine HAVE_IPP_A
+#cmakedefine HAVE_IPP_IW_LL
 
 /* JPEG-2000 codec */
 #cmakedefine HAVE_JASPER
@@ -147,6 +148,9 @@
 /* OpenNI library */
 #cmakedefine HAVE_OPENNI2
 
+/* librealsense library */
+#cmakedefine HAVE_LIBREALSENSE
+
 /* PNG codec */
 #cmakedefine HAVE_PNG
 
@@ -170,6 +174,9 @@
 
 /* Intel Threading Building Blocks */
 #cmakedefine HAVE_TBB
+
+/* Ste||ar Group High Performance ParallelX */
+#cmakedefine HAVE_HPX
 
 /* TIFF codec */
 #cmakedefine HAVE_TIFF
@@ -241,5 +248,7 @@
 /* OpenCV trace utilities */
 #cmakedefine OPENCV_TRACE
 
+/* Library QR-code decoding */
+#cmakedefine HAVE_QUIRC
 
 #endif // OPENCV_CVCONFIG_H_INCLUDED

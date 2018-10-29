@@ -45,6 +45,10 @@
 using namespace cv;
 using namespace cv::cuda;
 
+#if defined(_MSC_VER)
+#pragma warning(disable : 4702)  // unreachable code
+#endif
+
 /////////////////////////////////////////////////////////////
 /// MemoryStack
 
@@ -267,7 +271,7 @@ class cv::cuda::Stream::Impl
 public:
     Impl(void* ptr = 0)
     {
-        (void) ptr;
+        CV_UNUSED(ptr);
         throw_no_cuda();
     }
 };
@@ -439,7 +443,7 @@ cv::cuda::Stream::Stream()
 cv::cuda::Stream::Stream(const Ptr<GpuMat::Allocator>& allocator)
 {
 #ifndef HAVE_CUDA
-    (void) allocator;
+    CV_UNUSED(allocator);
     throw_no_cuda();
 #else
     impl_ = makePtr<Impl>(allocator);
@@ -450,7 +454,6 @@ bool cv::cuda::Stream::queryIfComplete() const
 {
 #ifndef HAVE_CUDA
     throw_no_cuda();
-    return false;
 #else
     cudaError_t err = cudaStreamQuery(impl_->stream);
 
@@ -474,7 +477,7 @@ void cv::cuda::Stream::waitForCompletion()
 void cv::cuda::Stream::waitEvent(const Event& event)
 {
 #ifndef HAVE_CUDA
-    (void) event;
+    CV_UNUSED(event);
     throw_no_cuda();
 #else
     cudaSafeCall( cudaStreamWaitEvent(impl_->stream, EventAccessor::getEvent(event), 0) );
@@ -506,13 +509,13 @@ namespace
 void cv::cuda::Stream::enqueueHostCallback(StreamCallback callback, void* userData)
 {
 #ifndef HAVE_CUDA
-    (void) callback;
-    (void) userData;
+    CV_UNUSED(callback);
+    CV_UNUSED(userData);
     throw_no_cuda();
 #else
     #if CUDART_VERSION < 5000
-        (void) callback;
-        (void) userData;
+        CV_UNUSED(callback);
+        CV_UNUSED(userData);
         CV_Error(cv::Error::StsNotImplemented, "This function requires CUDA >= 5.0");
     #else
         CallbackData* data = new CallbackData(callback, userData);
@@ -526,8 +529,6 @@ Stream& cv::cuda::Stream::Null()
 {
 #ifndef HAVE_CUDA
     throw_no_cuda();
-    static Stream stream;
-    return stream;
 #else
     const int deviceId = getDevice();
     return initializer.getNullStream(deviceId);
@@ -597,10 +598,11 @@ namespace
 
     StackAllocator::~StackAllocator()
     {
-        cudaStreamSynchronize(stream_);
-
         if (memStack_ != 0)
+        {
+            cudaStreamSynchronize(stream_);
             memStack_->pool->returnMemStack(memStack_);
+        }
     }
 
     size_t alignUp(size_t what, size_t alignment)
@@ -660,7 +662,7 @@ namespace
 void cv::cuda::setBufferPoolUsage(bool on)
 {
 #ifndef HAVE_CUDA
-    (void)on;
+    CV_UNUSED(on);
     throw_no_cuda();
 #else
     enableMemoryPool = on;
@@ -670,9 +672,9 @@ void cv::cuda::setBufferPoolUsage(bool on)
 void cv::cuda::setBufferPoolConfig(int deviceId, size_t stackSize, int stackCount)
 {
 #ifndef HAVE_CUDA
-    (void)deviceId;
-    (void)stackSize;
-    (void)stackCount;
+    CV_UNUSED(deviceId);
+    CV_UNUSED(stackSize);
+    CV_UNUSED(stackCount);
     throw_no_cuda();
 #else
     const int currentDevice = getDevice();
@@ -700,7 +702,7 @@ void cv::cuda::setBufferPoolConfig(int deviceId, size_t stackSize, int stackCoun
 #ifndef HAVE_CUDA
 cv::cuda::BufferPool::BufferPool(Stream& stream)
 {
-    (void) stream;
+    CV_UNUSED(stream);
     throw_no_cuda();
 }
 #else
@@ -712,11 +714,10 @@ cv::cuda::BufferPool::BufferPool(Stream& stream) : allocator_(stream.impl_->allo
 GpuMat cv::cuda::BufferPool::getBuffer(int rows, int cols, int type)
 {
 #ifndef HAVE_CUDA
-    (void) rows;
-    (void) cols;
-    (void) type;
+    CV_UNUSED(rows);
+    CV_UNUSED(cols);
+    CV_UNUSED(type);
     throw_no_cuda();
-    return GpuMat();
 #else
     GpuMat buf(allocator_);
     buf.create(rows, cols, type);
@@ -785,7 +786,7 @@ Event cv::cuda::EventAccessor::wrapEvent(cudaEvent_t event)
 cv::cuda::Event::Event(CreateFlags flags)
 {
 #ifndef HAVE_CUDA
-    (void) flags;
+    CV_UNUSED(flags);
     throw_no_cuda();
 #else
     impl_ = makePtr<Impl>(flags);
@@ -795,7 +796,7 @@ cv::cuda::Event::Event(CreateFlags flags)
 void cv::cuda::Event::record(Stream& stream)
 {
 #ifndef HAVE_CUDA
-    (void) stream;
+    CV_UNUSED(stream);
     throw_no_cuda();
 #else
     cudaSafeCall( cudaEventRecord(impl_->event, StreamAccessor::getStream(stream)) );
@@ -806,7 +807,6 @@ bool cv::cuda::Event::queryIfComplete() const
 {
 #ifndef HAVE_CUDA
     throw_no_cuda();
-    return false;
 #else
     cudaError_t err = cudaEventQuery(impl_->event);
 
@@ -830,10 +830,9 @@ void cv::cuda::Event::waitForCompletion()
 float cv::cuda::Event::elapsedTime(const Event& start, const Event& end)
 {
 #ifndef HAVE_CUDA
-    (void) start;
-    (void) end;
+    CV_UNUSED(start);
+    CV_UNUSED(end);
     throw_no_cuda();
-    return 0.0f;
 #else
     float ms;
     cudaSafeCall( cudaEventElapsedTime(&ms, start.impl_->event, end.impl_->event) );

@@ -121,8 +121,10 @@ macro(ocv_assert)
 endmacro()
 
 macro(ocv_debug_message)
-#  string(REPLACE ";" " " __msg "${ARGN}")
-#  message(STATUS "${__msg}")
+  if(OPENCV_CMAKE_DEBUG_MESSAGES)
+    string(REPLACE ";" " " __msg "${ARGN}")
+    message(STATUS "${__msg}")
+  endif()
 endmacro()
 
 macro(ocv_check_environment_variables)
@@ -259,7 +261,7 @@ function(ocv_include_directories)
     ocv_is_opencv_directory(__is_opencv_dir "${dir}")
     if(__is_opencv_dir)
       list(APPEND __add_before "${dir}")
-    elseif(CV_GCC AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0" AND
+    elseif(((CV_GCC AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0") OR CV_CLANG) AND
            dir MATCHES "/usr/include$")
       # workaround for GCC 6.x bug
     else()
@@ -504,7 +506,7 @@ macro(ocv_warnings_disable)
       foreach(var ${_flag_vars})
         foreach(warning ${_gxx_warnings})
           if(NOT warning MATCHES "^-Wno-")
-            string(REPLACE "${warning}" "" ${var} "${${var}}")
+            string(REGEX REPLACE "${warning}(=[^ ]*)?" "" ${var} "${${var}}")
             string(REPLACE "-W" "-Wno-" warning "${warning}")
           endif()
           ocv_check_flag_support(${var} "${warning}" _varname "")
@@ -997,6 +999,15 @@ function(ocv_convert_to_lib_name var)
   set(${var} ${tmp} PARENT_SCOPE)
 endfunction()
 
+if(MSVC AND BUILD_SHARED_LIBS)  # no defaults for static libs (modern CMake is required)
+  if(NOT CMAKE_VERSION VERSION_LESS 3.6.0)
+    option(INSTALL_PDB_COMPONENT_EXCLUDE_FROM_ALL "Don't install PDB files by default" ON)
+    option(INSTALL_PDB "Add install PDB rules" ON)
+  elseif(NOT CMAKE_VERSION VERSION_LESS 3.1.0)
+    option(INSTALL_PDB_COMPONENT_EXCLUDE_FROM_ALL "Don't install PDB files by default (not supported)" OFF)
+    option(INSTALL_PDB "Add install PDB rules" OFF)
+  endif()
+endif()
 
 # add install command
 function(ocv_install_target)
@@ -1028,9 +1039,10 @@ function(ocv_install_target)
   endif()
 
   if(MSVC)
-    if(INSTALL_PDB AND (NOT INSTALL_IGNORE_PDB))
-      set(__target "${ARGV0}")
-
+    set(__target "${ARGV0}")
+    if(INSTALL_PDB AND NOT INSTALL_IGNORE_PDB
+        AND NOT OPENCV_${__target}_PDB_SKIP
+    )
       set(__location_key "ARCHIVE")  # static libs
       get_target_property(__target_type ${__target} TYPE)
       if("${__target_type}" STREQUAL "SHARED_LIBRARY")
@@ -1062,16 +1074,28 @@ function(ocv_install_target)
           if(DEFINED INSTALL_PDB_COMPONENT AND INSTALL_PDB_COMPONENT)
             set(__pdb_install_component "${INSTALL_PDB_COMPONENT}")
           endif()
+          set(__pdb_exclude_from_all "")
+          if(INSTALL_PDB_COMPONENT_EXCLUDE_FROM_ALL)
+            if(NOT CMAKE_VERSION VERSION_LESS 3.6.0)
+              set(__pdb_exclude_from_all EXCLUDE_FROM_ALL)
+            else()
+              message(WARNING "INSTALL_PDB_COMPONENT_EXCLUDE_FROM_ALL requires CMake 3.6+")
+            endif()
+          endif()
+
 #          message(STATUS "Adding PDB file installation rule: target=${__target} dst=${__dst} component=${__pdb_install_component}")
           if("${__target_type}" STREQUAL "SHARED_LIBRARY")
-            install(FILES "$<TARGET_PDB_FILE:${__target}>" DESTINATION "${__dst}" COMPONENT ${__pdb_install_component} OPTIONAL)
+            install(FILES "$<TARGET_PDB_FILE:${__target}>" DESTINATION "${__dst}"
+                COMPONENT ${__pdb_install_component} OPTIONAL ${__pdb_exclude_from_all})
           else()
             # There is no generator expression similar to TARGET_PDB_FILE and TARGET_PDB_FILE can't be used: https://gitlab.kitware.com/cmake/cmake/issues/16932
             # However we still want .pdb files like: 'lib/Debug/opencv_core341d.pdb' or '3rdparty/lib/zlibd.pdb'
             install(FILES "$<TARGET_PROPERTY:${__target},ARCHIVE_OUTPUT_DIRECTORY>/$<CONFIG>/$<IF:$<BOOL:$<TARGET_PROPERTY:${__target},COMPILE_PDB_NAME_DEBUG>>,$<TARGET_PROPERTY:${__target},COMPILE_PDB_NAME_DEBUG>,$<TARGET_PROPERTY:${__target},COMPILE_PDB_NAME>>.pdb"
-                DESTINATION "${__dst}" CONFIGURATIONS Debug COMPONENT ${__pdb_install_component} OPTIONAL)
+                DESTINATION "${__dst}" CONFIGURATIONS Debug
+                COMPONENT ${__pdb_install_component} OPTIONAL ${__pdb_exclude_from_all})
             install(FILES "$<TARGET_PROPERTY:${__target},ARCHIVE_OUTPUT_DIRECTORY>/$<CONFIG>/$<IF:$<BOOL:$<TARGET_PROPERTY:${__target},COMPILE_PDB_NAME_RELEASE>>,$<TARGET_PROPERTY:${__target},COMPILE_PDB_NAME_RELEASE>,$<TARGET_PROPERTY:${__target},COMPILE_PDB_NAME>>.pdb"
-                DESTINATION "${__dst}" CONFIGURATIONS Release COMPONENT ${__pdb_install_component} OPTIONAL)
+                DESTINATION "${__dst}" CONFIGURATIONS Release
+                COMPONENT ${__pdb_install_component} OPTIONAL ${__pdb_exclude_from_all})
           endif()
         else()
           message(WARNING "PDB files installation is not supported (need CMake >= 3.1.0)")
@@ -1087,7 +1111,7 @@ function(ocv_install_3rdparty_licenses library)
     get_filename_component(name "${filename}" NAME)
     install(
       FILES "${filename}"
-      DESTINATION "${OPENCV_OTHER_INSTALL_PATH}/licenses"
+      DESTINATION "${OPENCV_LICENSES_INSTALL_PATH}"
       COMPONENT licenses
       RENAME "${library}-${name}"
       OPTIONAL)
@@ -1620,3 +1644,40 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.1)
 else()
   set(compatible_MESSAGE_NEVER "")
 endif()
+
+
+macro(ocv_git_describe var_name path)
+  if(GIT_FOUND)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" describe --tags --exact-match --dirty
+      WORKING_DIRECTORY "${path}"
+      OUTPUT_VARIABLE ${var_name}
+      RESULT_VARIABLE GIT_RESULT
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT GIT_RESULT EQUAL 0)
+      execute_process(COMMAND "${GIT_EXECUTABLE}" describe --tags --always --dirty --match "[0-9].[0-9].[0-9]*" --exclude "[^-]*-cvsdk"
+        WORKING_DIRECTORY "${path}"
+        OUTPUT_VARIABLE ${var_name}
+        RESULT_VARIABLE GIT_RESULT
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+      if(NOT GIT_RESULT EQUAL 0)  # --exclude is not supported by 'git'
+        # match only tags with complete OpenCV versions (ignores -alpha/-beta/-rc suffixes)
+        execute_process(COMMAND "${GIT_EXECUTABLE}" describe --tags --always --dirty --match "[0-9].[0-9]*[0-9]"
+          WORKING_DIRECTORY "${path}"
+          OUTPUT_VARIABLE ${var_name}
+          RESULT_VARIABLE GIT_RESULT
+          ERROR_QUIET
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT GIT_RESULT EQUAL 0)
+          set(${var_name} "unknown")
+        endif()
+      endif()
+    endif()
+  else()
+    set(${var_name} "unknown")
+  endif()
+endmacro()

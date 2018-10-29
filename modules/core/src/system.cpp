@@ -43,6 +43,7 @@
 
 #include "precomp.hpp"
 #include <iostream>
+#include <ostream>
 
 #include <opencv2/core/utils/configuration.private.hpp>
 #include <opencv2/core/utils/trace.private.hpp>
@@ -61,7 +62,26 @@ Mutex& getInitializationMutex()
 // force initialization (single-threaded environment)
 Mutex* __initialization_mutex_initializer = &getInitializationMutex();
 
+static bool param_dumpErrors = utils::getConfigurationParameterBool("OPENCV_DUMP_ERRORS",
+#if defined(_DEBUG) || defined(__ANDROID__)
+    true
+#else
+    false
+#endif
+);
+
+void* allocSingletonBuffer(size_t size) { return fastMalloc(size); }
+
 } // namespace cv
+
+#ifndef CV_ERROR_SET_TERMINATE_HANDLER  // build config option
+# if defined(_WIN32)
+#   define CV_ERROR_SET_TERMINATE_HANDLER 1
+# endif
+#endif
+#if defined(CV_ERROR_SET_TERMINATE_HANDLER) && !CV_ERROR_SET_TERMINATE_HANDLER
+# undef CV_ERROR_SET_TERMINATE_HANDLER
+#endif
 
 #ifdef _MSC_VER
 # if _MSC_VER >= 1700
@@ -69,7 +89,12 @@ Mutex* __initialization_mutex_initializer = &getInitializationMutex();
 # endif
 #endif
 
-#if defined __ANDROID__ || defined __linux__ || defined __FreeBSD__ || defined __HAIKU__
+#ifdef CV_ERROR_SET_TERMINATE_HANDLER
+#include <exception>      // std::set_terminate
+#include <cstdlib>        // std::abort
+#endif
+
+#if defined __ANDROID__ || defined __linux__ || defined __FreeBSD__ || defined __HAIKU__ || defined __Fuchsia__
 #  include <unistd.h>
 #  include <fcntl.h>
 #  include <elf.h>
@@ -510,7 +535,7 @@ struct HWFeatures
                     "******************************************************************\n");
             fprintf(stderr, "\nRequired baseline features:\n");
             checkFeatures(baseline_features, sizeof(baseline_features) / sizeof(baseline_features[0]), true);
-            CV_ErrorNoReturn(cv::Error::StsAssert, "Missing support for required CPU baseline features. Check OpenCV build configuration and required CPU/HW setup.");
+            CV_Error(cv::Error::StsAssert, "Missing support for required CPU baseline features. Check OpenCV build configuration and required CPU/HW setup.");
         }
 
         readSettings(baseline_features, sizeof(baseline_features) / sizeof(baseline_features[0]));
@@ -632,6 +657,27 @@ String getHardwareFeatureName(int feature)
     return name ? String(name) : String();
 }
 
+std::string getCPUFeaturesLine()
+{
+    const int features[] = { CV_CPU_BASELINE_FEATURES, CV_CPU_DISPATCH_FEATURES };
+    const int sz = sizeof(features) / sizeof(features[0]);
+    std::string result;
+    std::string prefix;
+    for (int i = 1; i < sz; ++i)
+    {
+        if (features[i] == 0)
+        {
+            prefix = "*";
+            continue;
+        }
+        if (i != 1) result.append(" ");
+        result.append(prefix);
+        result.append(getHWFeatureNameSafe(features[i]));
+        if (!checkHardwareSupport(features[i])) result.append("?");
+    }
+    return result;
+}
+
 volatile bool useOptimizedFlag = true;
 
 void setUseOptimized( bool flag )
@@ -714,7 +760,6 @@ int64 getCPUTickCount(void)
 
 int64 getCPUTickCount(void)
 {
-    int64 result = 0;
     unsigned upper, lower, tmp;
     __asm__ volatile(
                      "0:                  \n"
@@ -783,7 +828,7 @@ String format( const char* fmt, ... )
         va_list va;
         va_start(va, fmt);
         int bsize = static_cast<int>(buf.size());
-        int len = cv_vsnprintf((char *)buf, bsize, fmt, va);
+        int len = cv_vsnprintf(buf.data(), bsize, fmt, va);
         va_end(va);
 
         CV_Assert(len >= 0 && "Check format string for errors");
@@ -793,7 +838,7 @@ String format( const char* fmt, ... )
             continue;
         }
         buf[bsize - 1] = 0;
-        return String((char *)buf, len);
+        return String(buf.data(), len);
     }
 }
 
@@ -914,26 +959,68 @@ int cv_vsnprintf(char* buf, int len, const char* fmt, va_list args)
 #endif
 }
 
+static void dumpException(const Exception& exc)
+{
+    const char* errorStr = cvErrorStr(exc.code);
+    char buf[1 << 12];
+
+    cv_snprintf(buf, sizeof(buf),
+        "OpenCV(%s) Error: %s (%s) in %s, file %s, line %d",
+        CV_VERSION,
+        errorStr, exc.err.c_str(), exc.func.size() > 0 ?
+        exc.func.c_str() : "unknown function", exc.file.c_str(), exc.line);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_ERROR, "cv::error()", "%s", buf);
+#else
+    fflush(stdout); fflush(stderr);
+    fprintf(stderr, "%s\n", buf);
+    fflush(stderr);
+#endif
+}
+
+#ifdef CV_ERROR_SET_TERMINATE_HANDLER
+static bool cv_terminate_handler_installed = false;
+static std::terminate_handler cv_old_terminate_handler;
+static cv::Exception cv_terminate_handler_exception;
+static bool param_setupTerminateHandler = utils::getConfigurationParameterBool("OPENCV_SETUP_TERMINATE_HANDLER", true);
+static void cv_terminate_handler() {
+    std::cerr << "OpenCV: terminate handler is called! The last OpenCV error is:\n";
+    dumpException(cv_terminate_handler_exception);
+    if (false /*cv_old_terminate_handler*/)  // buggy behavior is observed with doubled "abort/retry/ignore" windows
+        cv_old_terminate_handler();
+    abort();
+}
+
+#endif
+
+#ifdef __GNUC__
+# if defined __clang__ || defined __APPLE__
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Winvalid-noreturn"
+# endif
+#endif
+
 void error( const Exception& exc )
 {
+#ifdef CV_ERROR_SET_TERMINATE_HANDLER
+    {
+        cv::AutoLock lock(getInitializationMutex());
+        if (!cv_terminate_handler_installed)
+        {
+            if (param_setupTerminateHandler)
+                cv_old_terminate_handler = std::set_terminate(cv_terminate_handler);
+            cv_terminate_handler_installed = true;
+        }
+        cv_terminate_handler_exception = exc;
+    }
+#endif
+
     if (customErrorCallback != 0)
         customErrorCallback(exc.code, exc.func.c_str(), exc.err.c_str(),
                             exc.file.c_str(), exc.line, customErrorCallbackData);
-    else
+    else if (param_dumpErrors)
     {
-        const char* errorStr = cvErrorStr(exc.code);
-        char buf[1 << 12];
-
-        cv_snprintf(buf, sizeof(buf),
-            "OpenCV(%s) Error: %s (%s) in %s, file %s, line %d",
-            CV_VERSION,
-            errorStr, exc.err.c_str(), exc.func.size() > 0 ?
-            exc.func.c_str() : "unknown function", exc.file.c_str(), exc.line);
-        fprintf( stderr, "%s\n", buf );
-        fflush( stderr );
-#  ifdef __ANDROID__
-        __android_log_print(ANDROID_LOG_ERROR, "cv::error()", "%s", buf);
-#  endif
+        dumpException(exc);
     }
 
     if(breakOnError)
@@ -943,12 +1030,32 @@ void error( const Exception& exc )
     }
 
     CV_THROW(exc);
+#ifdef __GNUC__
+# if !defined __clang__ && !defined __APPLE__
+    // this suppresses this warning: "noreturn" function does return [enabled by default]
+    __builtin_trap();
+    // or use infinite loop: for (;;) {}
+# endif
+#endif
 }
 
 void error(int _code, const String& _err, const char* _func, const char* _file, int _line)
 {
     error(cv::Exception(_code, _err, _func, _file, _line));
+#ifdef __GNUC__
+# if !defined __clang__ && !defined __APPLE__
+    // this suppresses this warning: "noreturn" function does return [enabled by default]
+    __builtin_trap();
+    // or use infinite loop: for (;;) {}
+# endif
+#endif
 }
+
+#ifdef __GNUC__
+# if defined __clang__ || defined __APPLE__
+#   pragma GCC diagnostic pop
+# endif
+#endif
 
 
 ErrorCallback
@@ -1490,18 +1597,26 @@ static TLSData<ThreadID>& getThreadIDTLS()
 } // namespace
 int utils::getThreadID() { return getThreadIDTLS().get()->id; }
 
-bool utils::getConfigurationParameterBool(const char* name, bool defaultValue)
+
+class ParseError
 {
-#ifdef NO_GETENV
-    const char* envValue = NULL;
-#else
-    const char* envValue = getenv(name);
-#endif
-    if (envValue == NULL)
+    std::string bad_value;
+public:
+    ParseError(const std::string bad_value_) :bad_value(bad_value_) {}
+    std::string toString(const std::string &param) const
     {
-        return defaultValue;
+        std::ostringstream out;
+        out << "Invalid value for parameter " << param << ": " << bad_value;
+        return out.str();
     }
-    cv::String value = envValue;
+};
+
+template <typename T>
+T parseOption(const std::string &);
+
+template<>
+inline bool parseOption(const std::string & value)
+{
     if (value == "1" || value == "True" || value == "true" || value == "TRUE")
     {
         return true;
@@ -1510,22 +1625,12 @@ bool utils::getConfigurationParameterBool(const char* name, bool defaultValue)
     {
         return false;
     }
-    CV_ErrorNoReturn(cv::Error::StsBadArg, cv::format("Invalid value for %s parameter: %s", name, value.c_str()));
+    throw ParseError(value);
 }
 
-
-size_t utils::getConfigurationParameterSizeT(const char* name, size_t defaultValue)
+template<>
+inline size_t parseOption(const std::string &value)
 {
-#ifdef NO_GETENV
-    const char* envValue = NULL;
-#else
-    const char* envValue = getenv(name);
-#endif
-    if (envValue == NULL)
-    {
-        return defaultValue;
-    }
-    cv::String value = envValue;
     size_t pos = 0;
     for (; pos < value.size(); pos++)
     {
@@ -1541,22 +1646,80 @@ size_t utils::getConfigurationParameterSizeT(const char* name, size_t defaultVal
         return v * 1024 * 1024;
     else if (suffixStr == "KB" || suffixStr == "Kb" || suffixStr == "kb")
         return v * 1024;
-    CV_ErrorNoReturn(cv::Error::StsBadArg, cv::format("Invalid value for %s parameter: %s", name, value.c_str()));
+    throw ParseError(value);
+}
+
+template<>
+inline cv::String parseOption(const std::string &value)
+{
+    return value;
+}
+
+template<>
+inline utils::Paths parseOption(const std::string &value)
+{
+    utils::Paths result;
+#ifdef _WIN32
+    const char sep = ';';
+#else
+    const char sep = ':';
+#endif
+    size_t start_pos = 0;
+    while (start_pos != std::string::npos)
+    {
+        const size_t pos = value.find(sep, start_pos);
+        const std::string one_piece(value, start_pos, pos == std::string::npos ? pos : pos - start_pos);
+        if (!one_piece.empty())
+            result.push_back(one_piece);
+        start_pos = pos == std::string::npos ? pos : pos + 1;
+    }
+    return result;
+}
+
+static inline const char * envRead(const char * name)
+{
+#ifdef NO_GETENV
+    CV_UNUSED(name);
+    return NULL;
+#else
+    return getenv(name);
+#endif
+}
+
+template<typename T>
+inline T read(const std::string & k, const T & defaultValue)
+{
+    try
+    {
+        const char * res = envRead(k.c_str());
+        if (res)
+            return parseOption<T>(std::string(res));
+    }
+    catch (const ParseError &err)
+    {
+        CV_Error(cv::Error::StsBadArg, err.toString(k));
+    }
+    return defaultValue;
+}
+
+bool utils::getConfigurationParameterBool(const char* name, bool defaultValue)
+{
+    return read<bool>(name, defaultValue);
+}
+
+size_t utils::getConfigurationParameterSizeT(const char* name, size_t defaultValue)
+{
+    return read<size_t>(name, defaultValue);
 }
 
 cv::String utils::getConfigurationParameterString(const char* name, const char* defaultValue)
 {
-#ifdef NO_GETENV
-    const char* envValue = NULL;
-#else
-    const char* envValue = getenv(name);
-#endif
-    if (envValue == NULL)
-    {
-        return defaultValue;
-    }
-    cv::String value = envValue;
-    return value;
+    return read<cv::String>(name, defaultValue ? cv::String(defaultValue) : cv::String());
+}
+
+utils::Paths utils::getConfigurationParameterPaths(const char* name, const utils::Paths &defaultValue)
+{
+    return read<utils::Paths>(name, defaultValue);
 }
 
 
@@ -1669,7 +1832,7 @@ FLAGS getFlags()
 
 NodeData::NodeData(const char* funName, const char* fileName, int lineNum, void* retAddress, bool alwaysExpand, cv::instr::TYPE instrType, cv::instr::IMPL implType)
 {
-    m_funName       = funName;
+    m_funName       = funName ? cv::String(funName) : cv::String();  // std::string doesn't accept NULL
     m_instrType     = instrType;
     m_implType      = implType;
     m_fileName      = fileName;
@@ -1849,10 +2012,17 @@ public:
         ippFeatures = cpuFeatures;
 
         const char* pIppEnv = getenv("OPENCV_IPP");
-        cv::String env = pIppEnv;
+        cv::String env;
+        if(pIppEnv != NULL)
+            env = pIppEnv;
         if(env.size())
         {
-#if IPP_VERSION_X100 >= 201703
+#if IPP_VERSION_X100 >= 201900
+            const Ipp64u minorFeatures = ippCPUID_MOVBE|ippCPUID_AES|ippCPUID_CLMUL|ippCPUID_ABR|ippCPUID_RDRAND|ippCPUID_F16C|
+                ippCPUID_ADCOX|ippCPUID_RDSEED|ippCPUID_PREFETCHW|ippCPUID_SHA|ippCPUID_MPX|ippCPUID_AVX512CD|ippCPUID_AVX512ER|
+                ippCPUID_AVX512PF|ippCPUID_AVX512BW|ippCPUID_AVX512DQ|ippCPUID_AVX512VL|ippCPUID_AVX512VBMI|ippCPUID_AVX512_4FMADDPS|
+                ippCPUID_AVX512_4VNNIW|ippCPUID_AVX512IFMA;
+#elif IPP_VERSION_X100 >= 201703
             const Ipp64u minorFeatures = ippCPUID_MOVBE|ippCPUID_AES|ippCPUID_CLMUL|ippCPUID_ABR|ippCPUID_RDRAND|ippCPUID_F16C|
                 ippCPUID_ADCOX|ippCPUID_RDSEED|ippCPUID_PREFETCHW|ippCPUID_SHA|ippCPUID_MPX|ippCPUID_AVX512CD|ippCPUID_AVX512ER|
                 ippCPUID_AVX512PF|ippCPUID_AVX512BW|ippCPUID_AVX512DQ|ippCPUID_AVX512VL|ippCPUID_AVX512VBMI;
@@ -1864,7 +2034,7 @@ public:
             const Ipp64u minorFeatures = 0;
 #endif
 
-            env = env.toLowerCase();
+            env = toLowerCase(env);
             if(env.substr(0, 2) == "ne")
             {
                 useIPP_NE = true;
@@ -2040,12 +2210,12 @@ void setUseIPP(bool flag)
 #ifdef HAVE_IPP
     data->useIPP = (getIPPSingleton().useIPP)?flag:false;
 #else
-    (void)flag;
+    CV_UNUSED(flag);
     data->useIPP = false;
 #endif
 }
 
-bool useIPP_NE()
+bool useIPP_NotExact()
 {
 #ifdef HAVE_IPP
     CoreTLSData* data = getCoreTlsData().get();
@@ -2059,13 +2229,13 @@ bool useIPP_NE()
 #endif
 }
 
-void setUseIPP_NE(bool flag)
+void setUseIPP_NotExact(bool flag)
 {
     CoreTLSData* data = getCoreTlsData().get();
 #ifdef HAVE_IPP
-    data->useIPP_NE = (getIPPSingleton().useIPP_NE)?flag:false;
+    data->useIPP_NE = flag;
 #else
-    (void)flag;
+    CV_UNUSED(flag);
     data->useIPP_NE = false;
 #endif
 }

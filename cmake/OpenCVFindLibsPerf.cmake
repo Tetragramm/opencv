@@ -7,6 +7,13 @@ if(WITH_TBB)
   include("${OpenCV_SOURCE_DIR}/cmake/OpenCVDetectTBB.cmake")
 endif(WITH_TBB)
 
+# --- HPX ---
+if(WITH_HPX)
+  find_package(HPX REQUIRED)
+  ocv_include_directories(${HPX_INCLUDE_DIRS})
+  set(HAVE_HPX TRUE)
+endif(WITH_HPX)
+
 # --- IPP ---
 if(WITH_IPP)
   include("${OpenCV_SOURCE_DIR}/cmake/OpenCVFindIPP.cmake")
@@ -28,22 +35,11 @@ if(WITH_IPP)
   endif()
 endif()
 
-# --- IPP Async ---
-
-if(WITH_IPP_A)
-  include("${OpenCV_SOURCE_DIR}/cmake/OpenCVFindIPPAsync.cmake")
-  if(IPP_A_INCLUDE_DIR AND IPP_A_LIBRARIES)
-    ocv_include_directories(${IPP_A_INCLUDE_DIR})
-    link_directories(${IPP_A_LIBRARIES})
-    set(OPENCV_LINKER_LIBS ${OPENCV_LINKER_LIBS} ${IPP_A_LIBRARIES})
-   endif()
-endif(WITH_IPP_A)
-
 # --- CUDA ---
 if(WITH_CUDA)
   include("${OpenCV_SOURCE_DIR}/cmake/OpenCVDetectCUDA.cmake")
   if(NOT HAVE_CUDA)
-    message(WARNING "OpenCV is not able to find/confidure CUDA SDK (required by WITH_CUDA).
+    message(WARNING "OpenCV is not able to find/configure CUDA SDK (required by WITH_CUDA).
 CUDA support will be disabled in OpenCV build.
 To eliminate this warning remove WITH_CUDA=ON CMake configuration option.
 ")

@@ -220,7 +220,7 @@ void CirclesGridClusterFinder::findOutsideCorners(const std::vector<cv::Point2f>
   CV_Assert(!corners.empty());
   outsideCorners.clear();
   //find two pairs of the most nearest corners
-  int i, j, n = (int)corners.size();
+  const size_t n = corners.size();
 
 #ifdef DEBUG_CIRCLES
   Mat cornersImage(1024, 1248, CV_8UC1, Scalar(0));
@@ -228,22 +228,22 @@ void CirclesGridClusterFinder::findOutsideCorners(const std::vector<cv::Point2f>
   imshow("corners", cornersImage);
 #endif
 
-  std::vector<Point2f> tangentVectors(corners.size());
-  for(size_t k=0; k<corners.size(); k++)
+  std::vector<Point2f> tangentVectors(n);
+  for(size_t k=0; k < n; k++)
   {
-    Point2f diff = corners[(k + 1) % corners.size()] - corners[k];
+    Point2f diff = corners[(k + 1) % n] - corners[k];
     tangentVectors[k] = diff * (1.0f / norm(diff));
   }
 
   //compute angles between all sides
-  Mat cosAngles(n, n, CV_32FC1, 0.0f);
-  for(i = 0; i < n; i++)
+  Mat cosAngles((int)n, (int)n, CV_32FC1, 0.0f);
+  for(size_t i = 0; i < n; i++)
   {
-    for(j = i + 1; j < n; j++)
+    for(size_t j = i + 1; j < n; j++)
     {
       float val = fabs(tangentVectors[i].dot(tangentVectors[j]));
-      cosAngles.at<float>(i, j) = val;
-      cosAngles.at<float>(j, i) = val;
+      cosAngles.at<float>((int)i, (int)j) = val;
+      cosAngles.at<float>((int)j, (int)i) = val;
     }
   }
 
@@ -272,10 +272,10 @@ void CirclesGridClusterFinder::findOutsideCorners(const std::vector<cv::Point2f>
   const int bigDiff = 4;
   if(maxIdx - minIdx == bigDiff)
   {
-    minIdx += n;
+    minIdx += (int)n;
     std::swap(maxIdx, minIdx);
   }
-  if(maxIdx - minIdx != n - bigDiff)
+  if(maxIdx - minIdx != (int)n - bigDiff)
   {
     return;
   }
@@ -390,9 +390,9 @@ void CirclesGridClusterFinder::rectifyPatternPoints(const std::vector<cv::Point2
 void CirclesGridClusterFinder::parsePatternPoints(const std::vector<cv::Point2f> &patternPoints, const std::vector<cv::Point2f> &rectifiedPatternPoints, std::vector<cv::Point2f> &centers)
 {
 #ifndef HAVE_OPENCV_FLANN
-  (void)patternPoints;
-  (void)rectifiedPatternPoints;
-  (void)centers;
+  CV_UNUSED(patternPoints);
+  CV_UNUSED(rectifiedPatternPoints);
+  CV_UNUSED(centers);
   CV_Error(Error::StsNotImplemented, "The desired functionality requires flann module, which was disabled.");
 #else
   flann::LinearIndexParams flannIndexParams;
@@ -751,12 +751,8 @@ bool CirclesGridFinder::isDetectionCorrect()
       }
       return (vertices.size() == largeHeight * largeWidth + smallHeight * smallWidth);
     }
-
-    default:
-      CV_Error(0, "Unknown pattern type");
   }
-
-  return false;
+  CV_Error(Error::StsBadArg, "Unknown pattern type");
 }
 
 void CirclesGridFinder::findMCS(const std::vector<Point2f> &basis, std::vector<Graph> &basisGraphs)

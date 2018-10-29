@@ -661,7 +661,7 @@ public:
 
     virtual void operator() (const Range & range) const CV_OVERRIDE
     {
-        CV_INSTRUMENT_REGION_IPP()
+        CV_INSTRUMENT_REGION_IPP();
 
         if(!m_ok)
             return;
@@ -813,13 +813,17 @@ namespace cv
 {
 static bool ipp_calchist(const Mat &image, Mat &hist, int histSize, const float** ranges, bool uniform, bool accumulate)
 {
-    CV_INSTRUMENT_REGION_IPP()
+    CV_INSTRUMENT_REGION_IPP();
 
 #if IPP_VERSION_X100 < 201801
     // No SSE42 optimization for uniform 32f
     if(uniform && image.depth() == CV_32F && cv::ipp::getIppTopFeatures() == ippCPUID_SSE42)
         return false;
 #endif
+
+    // IPP_DISABLE_HISTOGRAM - https://github.com/opencv/opencv/issues/11544
+    if (uniform && (ranges[0][1] - ranges[0][0]) != histSize)
+        return false;
 
     Mat ihist = hist;
     if(accumulate)
@@ -858,7 +862,7 @@ void cv::calcHist( const Mat* images, int nimages, const int* channels,
                    InputArray _mask, OutputArray _hist, int dims, const int* histSize,
                    const float** ranges, bool uniform, bool accumulate )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     CV_OVX_RUN(
         images && histSize &&
@@ -1119,7 +1123,7 @@ static bool ocl_calcHist1(InputArray _src, OutputArray _hist, int ddepth = CV_32
     int kercn = dev.isAMD() && use16 ? 16 : std::min(4, ocl::predictOptimalVectorWidth(_src));
 
     ocl::Kernel k1("calculate_histogram", ocl::imgproc::histogram_oclsrc,
-                   format("-D BINS=%d -D HISTS_COUNT=%d -D WGS=%d -D kercn=%d -D T=%s%s",
+                   format("-D BINS=%d -D HISTS_COUNT=%d -D WGS=%zu -D kercn=%d -D T=%s%s",
                           BINS, compunits, wgs, kercn,
                           kercn == 4 ? "int" : ocl::typeToStr(CV_8UC(kercn)),
                           _src.isContinuous() ? " -D HAVE_SRC_CONT" : ""));
@@ -1168,7 +1172,7 @@ void cv::calcHist( const Mat* images, int nimages, const int* channels,
                InputArray _mask, SparseMat& hist, int dims, const int* histSize,
                const float** ranges, bool uniform, bool accumulate )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     Mat mask = _mask.getMat();
     calcHist( images, nimages, channels, mask, hist, dims, histSize,
@@ -1182,7 +1186,7 @@ void cv::calcHist( InputArrayOfArrays images, const std::vector<int>& channels,
                    const std::vector<float>& ranges,
                    bool accumulate )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     CV_OCL_RUN(images.total() == 1 && channels.size() == 1 && images.channels(0) == 1 &&
                channels[0] == 0 && images.isUMatVector() && mask.empty() && !accumulate &&
@@ -1515,7 +1519,7 @@ void cv::calcBackProject( const Mat* images, int nimages, const int* channels,
                           InputArray _hist, OutputArray _backProject,
                           const float** ranges, double scale, bool uniform )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     Mat hist = _hist.getMat();
     std::vector<uchar*> ptrs;
@@ -1684,7 +1688,7 @@ void cv::calcBackProject( const Mat* images, int nimages, const int* channels,
                           const SparseMat& hist, OutputArray _backProject,
                           const float** ranges, double scale, bool uniform )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     std::vector<uchar*> ptrs;
     std::vector<int> deltas;
@@ -1864,7 +1868,7 @@ void cv::calcBackProject( InputArrayOfArrays images, const std::vector<int>& cha
                           const std::vector<float>& ranges,
                           double scale )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
     if (hist.dims() <= 2)
     {
 #ifdef HAVE_OPENCL
@@ -1919,14 +1923,14 @@ void cv::calcBackProject( InputArrayOfArrays images, const std::vector<int>& cha
 
 double cv::compareHist( InputArray _H1, InputArray _H2, int method )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     Mat H1 = _H1.getMat(), H2 = _H2.getMat();
     const Mat* arrays[] = {&H1, &H2, 0};
     Mat planes[2];
     NAryMatIterator it(arrays, planes);
     double result = 0;
-    int j, len = (int)it.size;
+    int j;
 
     CV_Assert( H1.type() == H2.type() && H1.depth() == CV_32F );
 
@@ -1942,7 +1946,7 @@ double cv::compareHist( InputArray _H1, InputArray _H2, int method )
     {
         const float* h1 = it.planes[0].ptr<float>();
         const float* h2 = it.planes[1].ptr<float>();
-        len = it.planes[0].rows*it.planes[0].cols*H1.channels();
+        const int len = it.planes[0].rows*it.planes[0].cols*H1.channels();
         j = 0;
 
         if( (method == CV_COMP_CHISQR) || (method == CV_COMP_CHISQR_ALT))
@@ -2127,7 +2131,7 @@ double cv::compareHist( InputArray _H1, InputArray _H2, int method )
 
 double cv::compareHist( const SparseMat& H1, const SparseMat& H2, int method )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     double result = 0;
     int i, dims = H1.dims();
@@ -2441,7 +2445,7 @@ cvGetMinMaxHistValue( const CvHistogram* hist,
     if( !CV_IS_SPARSE_HIST(hist) )
     {
         CvMat mat;
-        CvPoint minPt, maxPt;
+        CvPoint minPt = {0, 0}, maxPt = {0, 0};
 
         cvGetMat( hist->bins, &mat, 0, 1 );
         cvMinMaxLoc( &mat, &minVal, &maxVal, &minPt, &maxPt );
@@ -2965,7 +2969,7 @@ cvCalcArrBackProjectPatch( CvArr** arr, CvArr* dst, CvSize patch_size, CvHistogr
     CvMat dststub, *dstmat;
     int i, dims;
     int x, y;
-    CvSize size;
+    cv::Size size;
 
     if( !CV_IS_HIST(hist))
         CV_Error( CV_StsBadArg, "Bad histogram pointer" );
@@ -3249,7 +3253,7 @@ static bool ocl_equalizeHist(InputArray _src, OutputArray _dst)
     int kercn = dev.isAMD() && use16 ? 16 : std::min(4, ocl::predictOptimalVectorWidth(_src));
 
     ocl::Kernel k1("calculate_histogram", ocl::imgproc::histogram_oclsrc,
-                   format("-D BINS=%d -D HISTS_COUNT=%d -D WGS=%d -D kercn=%d -D T=%s%s",
+                   format("-D BINS=%d -D HISTS_COUNT=%d -D WGS=%zu -D kercn=%d -D T=%s%s",
                           BINS, compunits, wgs, kercn,
                           kercn == 4 ? "int" : ocl::typeToStr(CV_8UC(kercn)),
                           _src.isContinuous() ? " -D HAVE_SRC_CONT" : ""));
@@ -3325,7 +3329,7 @@ static bool openvx_equalize_hist(Mat srcMat, Mat dstMat)
 
 void cv::equalizeHist( InputArray _src, OutputArray _dst )
 {
-    CV_INSTRUMENT_REGION()
+    CV_INSTRUMENT_REGION();
 
     CV_Assert( _src.type() == CV_8UC1 );
 

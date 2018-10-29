@@ -21,12 +21,16 @@ else()
                                        -Wunused-function -Wunused-const-variable -Wshorten-64-to-32 -Wno-invalid-offsetof
                                        -Wenum-compare-switch
                                        -Wsuggest-override -Winconsistent-missing-override
+                                       -Wimplicit-fallthrough
   )
 endif()
 if(CV_ICC)
   ocv_warnings_disable(CMAKE_CXX_FLAGS
       -wd265 -wd858 -wd873 -wd2196
   )
+endif()
+if(CV_GCC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 8.0)
+  ocv_warnings_disable(CMAKE_CXX_FLAGS -Wclass-memaccess)
 endif()
 
 # Easier to support different versions of protobufs

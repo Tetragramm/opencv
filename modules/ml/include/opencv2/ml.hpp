@@ -198,7 +198,7 @@ public:
     CV_WRAP virtual Mat getTestSampleWeights() const = 0;
     CV_WRAP virtual Mat getVarIdx() const = 0;
     CV_WRAP virtual Mat getVarType() const = 0;
-    CV_WRAP Mat getVarSymbolFlags() const;
+    CV_WRAP virtual Mat getVarSymbolFlags() const = 0;
     CV_WRAP virtual int getResponseType() const = 0;
     CV_WRAP virtual Mat getTrainSampleIdx() const = 0;
     CV_WRAP virtual Mat getTestSampleIdx() const = 0;
@@ -234,12 +234,23 @@ public:
     CV_WRAP virtual void shuffleTrainTest() = 0;
 
     /** @brief Returns matrix of test samples */
-    CV_WRAP Mat getTestSamples() const;
+    CV_WRAP virtual Mat getTestSamples() const = 0;
 
     /** @brief Returns vector of symbolic names captured in loadFromCSV() */
-    CV_WRAP void getNames(std::vector<String>& names) const;
+    CV_WRAP virtual void getNames(std::vector<String>& names) const = 0;
 
-    CV_WRAP static Mat getSubVector(const Mat& vec, const Mat& idx);
+    /** @brief Extract from 1D vector elements specified by passed indexes.
+    @param vec input vector (supported types: CV_32S, CV_32F, CV_64F)
+    @param idx 1D index vector
+     */
+    static CV_WRAP Mat getSubVector(const Mat& vec, const Mat& idx);
+
+    /** @brief Extract from matrix rows/cols specified by passed indexes.
+    @param matrix input matrix (supported types: CV_32S, CV_32F, CV_64F)
+    @param idx 1D index vector
+    @param layout specifies to extract rows (cv::ml::ROW_SAMPLES) or to extract columns (cv::ml::COL_SAMPLES)
+     */
+    static CV_WRAP Mat getSubMatrix(const Mat& matrix, const Mat& idx, int layout);
 
     /** @brief Reads the dataset from a .csv file and returns the ready-to-use training data.
 
@@ -727,7 +738,7 @@ public:
     regression (SVM::EPS_SVR or SVM::NU_SVR). If it is SVM::ONE_CLASS, no optimization is made and
     the usual %SVM with parameters specified in params is executed.
     */
-    CV_WRAP bool trainAuto(InputArray samples,
+    CV_WRAP virtual bool trainAuto(InputArray samples,
             int layout,
             InputArray responses,
             int kFold = 10,
@@ -737,7 +748,7 @@ public:
             Ptr<ParamGrid> nuGrid     = SVM::getDefaultGridPtr(SVM::NU),
             Ptr<ParamGrid> coeffGrid  = SVM::getDefaultGridPtr(SVM::COEF),
             Ptr<ParamGrid> degreeGrid = SVM::getDefaultGridPtr(SVM::DEGREE),
-            bool balanced=false);
+            bool balanced=false) = 0;
 
     /** @brief Retrieves all the support vectors
 
@@ -752,7 +763,7 @@ public:
     support vector, used for prediction, was derived from. They are returned in a floating-point
     matrix, where the support vectors are stored as matrix rows.
      */
-    CV_WRAP Mat getUncompressedSupportVectors() const;
+    CV_WRAP virtual Mat getUncompressedSupportVectors() const = 0;
 
     /** @brief Retrieves the decision function
 
@@ -1273,7 +1284,7 @@ public:
         @param results Array where the result of the calculation will be written.
         @param flags Flags for defining the type of RTrees.
     */
-    CV_WRAP void getVotes(InputArray samples, OutputArray results, int flags) const;
+    CV_WRAP virtual void getVotes(InputArray samples, OutputArray results, int flags) const = 0;
 
     /** Creates the empty model.
     Use StatModel::train to train the model, StatModel::train to create and train the model,
